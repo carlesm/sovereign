@@ -35,7 +35,7 @@
         state=directory
         owner=root
         group=root
-        mode=600
+        mode=0600
 
 - name: Generate CA certificate
   command: openssl req -nodes -batch -new -x509 -key {{ openvpn_ca }}.key -out {{ openvpn_ca }}.crt -days {{ openvpn_days_valid }} -subj "{{ openssl_request_subject }}/CN=ca-certificate"
@@ -119,19 +119,21 @@
   command: openssl dhparam -out {{ openvpn_dhparam }} {{ openvpn_key_size }}
            creates={{ openvpn_dhparam }}
 
-- name: Copy rc.local with firewall and dnsmasq rules into place
-  template: src=etc_rc.local dest=/etc/rc.local
+- name: Add empty rc.local if it doesn't exist
+  copy: src=rc.local dest=/etc/rc.local mode=0700 owner=root group=root force=no
+
+- name: custom rc.local file with iptables rules
+  template: src=rc.local_ansible_openvpn dest=/etc/rc.local_ansible_openvpn mode=0700 owner=root group=root
+
+- name: Ensure custom rc.local file is included in rc.local
+  lineinfile: dest=/etc/rc.local line='bash /etc/rc.local_ansible_openvpn' insertbefore='exit 0'
+
+- name: Run custom rc file
+  command: bash /etc/rc.local_ansible_openvpn
+  changed_when: False
 
 - name: Enable IPv4 traffic forwarding
   sysctl: name=net.ipv4.ip_forward value=1
-
-- name: Allow OpenVPN through the firewall
-  command: "{{ item }}"
-  with_items:
-    - iptables -A FORWARD -m state --state RELATED,ESTABLISHED -j ACCEPT
-    - iptables -A FORWARD -s 10.8.0.0/24 -j ACCEPT
-    - iptables -A FORWARD -j REJECT
-    - iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -o {{ ansible_default_ipv4.interface }} -j MASQUERADE
 
 - name: Allow OpenVPN through ufw
   ufw: rule=allow port={{ openvpn_port }} proto={{ openvpn_protocol }}
@@ -141,6 +143,13 @@
   template: src=etc_openvpn_server.conf.j2 dest=/etc/openvpn/server.conf
   notify: restart openvpn
 
+- name: Copy OpenVPN PAM configuration file into place
+  copy: src=etc_pam.d_openvpn dest=/etc/pam.d/openvpn
+  notify: restart openvpn
+
+- name: Enable OpenVPN server systemd service unit
+  service: name=openvpn@server enabled=yes
+
 # OpenVPN must restart first so the 10.8.0.0 interface is available
 # to dnsmasq
 - meta: flush_handlers
@@ -148,10 +157,6 @@
 - name: Copy dnsmasq configuration file into place
   copy: src=etc_dnsmasq.conf dest=/etc/dnsmasq.conf
   notify: restart dnsmasq
-
-- name: Copy OpenVPN PAM configuration file into place
-  copy: src=etc_pam.d_openvpn dest=/etc/pam.d/openvpn
-  notify: restart openvpn
 
 - name: Copy the ca.crt and ta.key files that clients will need in order to connect to the OpenVPN server
   command: cp {{ openvpn_path }}/{{ item[1] }} {{ openvpn_path }}/{{ item[0] }}

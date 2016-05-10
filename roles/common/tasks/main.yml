@@ -1,11 +1,4 @@
 ---
-# Defines tasks applicable across all machines in the infrastructure.
-- name: Set up closest mirror autoselect (Ubuntu-only)
-  template: src=apt_sources.list.j2 dest=/etc/apt/sources.list
-  when: ansible_distribution == 'Ubuntu'
-  tags:
-    - dependencies
-
 - name: Update apt cache
   apt: update_cache=yes
   tags:
@@ -64,12 +57,13 @@
   file: state=directory path=/decrypted
 
 - name: Set decrypted directory permissions
-  file: state=directory path=/decrypted group=mail mode=775
+  file: state=directory path=/decrypted group=mail mode=0775
 
 - include: encfs.yml tags=encfs
 - include: users.yml tags=users
 - include: apache.yml tags=apache
 - include: ssl.yml tags=ssl
+- include: letsencrypt.yml tags=letsencrypt
 - include: ufw.yml tags=ufw
 - include: security.yml tags=security
 - include: ntp.yml tags=ntp
